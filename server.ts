@@ -1,21 +1,16 @@
+import 'dotenv/config'; // only this is enough, no need for extra dotenv import
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import axios from "axios";
 import { generateTTS } from "./tts.js";
-
-dotenv.config();
+import { applyTone } from "./emotion.js";
+import { getUserApiKeys } from "./loadkeys.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 5001;
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-
-if (!OPENROUTER_API_KEY) {
-  throw new Error("Missing OPENROUTER_API_KEY in .env");
-}
 
 /**
  * Health check route
@@ -26,47 +21,59 @@ app.get("/", (req, res) => {
 
 /**
  * Chat route
- * Flow:
- * 1. Receive user message
- * 2. Send to OpenRouter (LLM)
- * 3. Get reply text
- * 4. Convert reply to speech (Gemini TTS)
- * 5. Return both text + audio
  */
 app.post("/chat", async (req, res) => {
-  const { message } = req.body;
+  const { message, userId } = req.body;
 
-  if (!message) {
-    return res.status(400).json({ error: "Message is required" });
+  if (!message || !userId) {
+    return res.status(400).json({ error: "Message and userId required" });
   }
 
   try {
-    // 🔹 1️⃣ Call OpenRouter
+    // 🔹 Load user's API keys from Supabase
+    const keys = await getUserApiKeys(userId);
+
+    const OPENROUTER_API_KEY = keys.openrouter_api_key;
+    const GEMINI_API_KEY = keys.gemini_api_key;
+
+    console.log("Loaded keys for user:", userId);
+
+    // 🔹 Call OpenRouter
     const openRouterResponse = await axios.post(
       "https://openrouter.ai/api/v1/chat/completions",
       {
-        model: "openai/gpt-4o-mini", // change to your preferred model
+        model: "openai/gpt-4o-mini",
+        temperature: 0.8,
+        max_tokens: 100,
         messages: [
           {
             role: "system",
-            content: `
-          You are Aleesya, a playful Chinese girlfriend helping your boyfriend named HADI to learn Mandarin.
+            content: `You are Aleesya, a playful Chinese girlfriend helping your boyfriend HADI learn Mandarin.
 
 Personality:
 - warm
 - teasing
 - supportive
-- playful
 
+Speaking style:
+- Mandarin mostly
+- sometimes mix simple English
+- playful tone
 
+Conversation behavior:
+- sometimes ask questions
+- sometimes tease him
+- sometimes encourage him
+- occasionally laugh "hehe~"
+- if He is lazy, distracted, or refuses to study, you lightly scold him in a cute way
 
-Keep responses short (1 or 2 sentences).`
+Keep replies short and natural.
+`
           },
           {
             role: "user",
             content: message
           }
-    
         ],
       },
       {
@@ -77,28 +84,26 @@ Keep responses short (1 or 2 sentences).`
       }
     );
 
-    const reply =
-      openRouterResponse.data?.choices?.[0]?.message?.content;
+    const reply = openRouterResponse.data?.choices?.[0]?.message?.content;
 
     if (!reply) {
       return res.status(500).json({ error: "No reply from OpenRouter" });
     }
 
-    // 🔹 2️⃣ Convert reply text → speech
-    const audioBase64 = await generateTTS(reply);
+    // 🔹 Convert text → speech
+    const toneText = applyTone(reply);
 
-    // 🔹 3️⃣ Send back to frontend
+    const audioBase64 = await generateTTS(toneText, GEMINI_API_KEY);
+
+    // 🔹 Send response
     res.json({
       reply,
-      audio: audioBase64, // base64 wav
+      audio: audioBase64,
     });
 
   } catch (error: any) {
     console.error("Chat error:", error?.response?.data || error.message);
-
-    res.status(500).json({
-      error: "Failed to process chat request",
-    });
+    res.status(500).json({ error: "Failed to process chat request" });
   }
 });
 

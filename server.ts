@@ -35,6 +35,7 @@ app.post("/chat", async (req, res) => {
 
     const OPENROUTER_API_KEY = keys.openrouter_api_key;
     const GEMINI_API_KEY = keys.gemini_api_key;
+    const USER_NAME = keys.username;
 
     console.log("Loaded keys for user:", userId);
 
@@ -48,7 +49,7 @@ app.post("/chat", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: `You are Aleesya, a playful Chinese girlfriend helping your boyfriend HADI learn Mandarin.
+            content: `You are Aleesya, a playful Chinese girlfriend helping your friend ${USER_NAME} learn Mandarin.
 
 Personality:
 - warm
